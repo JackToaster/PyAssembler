@@ -7,7 +7,7 @@ bne     $s0, $zero, jump1           ;010 000 001 0000001     0x4081
 nop         ;(unused)                0000000000000000        0x0000
 jump1: blt     $s0, $zero, jump2    ;011 000 001 0000001     0x6081
 nop         ;(unused)                0000000000000000        0x0000
-jump2: sw      $s0, 1($zero)        ;101 000 001 0000001     0xA081
+jump: sw      $s0, 1($zero)        ;101 000 001 0000001     0xA081
 lw      $s1, 1 ($zero)               ;100 000 010 0000001     0x8101
 # J-type instruction
 j    start                          ;110 0000000000000       0xC000

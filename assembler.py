@@ -1,13 +1,26 @@
 from instructions import ADDRESS_INCREMENT
 from parser import parse_asm, Label, ParserInput
 
-ASM_FILENAME = 'input.asm'
-OUT_FILENAME = 'output.txt'
-
+import argparse
+from pathlib import Path
+import sys
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('infile', metavar='INPUT', help='Assembly file to read')
+    parser.add_argument('-o', metavar='OUTPUT', help='File to write hexadecimal machine code into')
+
+    args = parser.parse_args()
+
+    asmfile = args.infile
+    outfile = args.o
+
+    if outfile is None:
+        outfile = Path(asmfile)
+        outfile = outfile.with_suffix('.o')
+
     # First pass: Parse text into syntax tree (not a very impressive tree as assembly has no nesting structure)
-    with open(ASM_FILENAME, 'r') as asmfile:
+    with open(asmfile, 'r') as asmfile:
         asm_text = asmfile.read()
         # print(len(asm_text))
         parse_input = ParserInput(asm_text)
@@ -16,11 +29,11 @@ def main():
         #     print('Failed to parse entire file. Remainder: {}'.format(rem.rtext()))
 
         if ast.error():
-            print(ast)
+            # print(ast)
             parse_input.display_error(ast, 4, 5)
-            return
+            sys.exit(1)
 
-    print(ast)
+    # print(ast)
 
     # Second pass: determine addresses addresses for labels
     address = 0
@@ -30,7 +43,8 @@ def main():
             if item.value not in label_addresses.keys():
                 label_addresses[item.value] = address
             else:
-                raise SyntaxError('Duplicate label {}'.format(item.name))
+                print('Error: Label {} defined more than once'.format(item.value.name))
+                sys.exit(1)
         elif hasattr(item.value, '__iter__'):  # Found instruction, increment address
             address += ADDRESS_INCREMENT
 
@@ -49,7 +63,7 @@ def main():
             machine_code.append(instruction.to_machine_code(address, *arguments))
             address += ADDRESS_INCREMENT
 
-    with open(OUT_FILENAME, 'w') as outfile:
+    with open(outfile, 'w') as outfile:
         for instruction in machine_code:
             outfile.write('{:04x}\n'.format(instruction))
 
