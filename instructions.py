@@ -66,7 +66,7 @@ class Branch(IType):
 
 class JType(Instruction):
     def to_machine_code(self, address, *args):
-        imm = args[0]
+        imm = args[0] // ADDRESS_INCREMENT  # Divide by ADDRESS_INCREMENT because we assume instruction memory is always word aligned
 
         return (self.opcode << (16 - OPCODE_BITS)) + imm
 
