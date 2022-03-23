@@ -1,5 +1,5 @@
 from instructions import ADDRESS_INCREMENT
-from parser import parse_asm, Label, ParserInput, ParseResult
+from parser import parse_asm, Label, ParserInput
 
 ASM_FILENAME = 'input.asm'
 OUT_FILENAME = 'output.txt'
@@ -9,10 +9,16 @@ def main():
     # First pass: Parse text into syntax tree (not a very impressive tree as assembly has no nesting structure)
     with open(ASM_FILENAME, 'r') as asmfile:
         asm_text = asmfile.read()
-        print(len(asm_text))
-        ast, rem = parse_asm(ParserInput(asm_text))
-        if len(rem.rtext()) > 0:
-            print('Failed to parse file. Remainder: {}'.format(rem.rtext()))  # TODO Make a better error message
+        # print(len(asm_text))
+        parse_input = ParserInput(asm_text)
+        ast, rem = parse_asm(parse_input)
+        # if len(rem.rtext()) > 0:
+        #     print('Failed to parse entire file. Remainder: {}'.format(rem.rtext()))
+
+        if ast.error():
+            print(ast)
+            parse_input.display_error(ast, 4, 5)
+            return
 
     print(ast)
 
@@ -28,7 +34,7 @@ def main():
         elif hasattr(item.value, '__iter__'):  # Found instruction, increment address
             address += ADDRESS_INCREMENT
 
-    print(label_addresses)
+    # print(label_addresses)
 
     # Third pass: Generate machine code
     address = 0
@@ -39,7 +45,7 @@ def main():
             instruction = item.value[0].value
             arguments = [it.value for it in item.value[1:]]
             arguments = list(map(lambda arg: label_addresses[arg] if isinstance(arg, Label) else arg, arguments))
-            print(arguments)
+            # print(arguments)
             machine_code.append(instruction.to_machine_code(address, *arguments))
             address += ADDRESS_INCREMENT
 

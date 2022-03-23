@@ -108,3 +108,9 @@ nop_instructions = [
     Instruction('nop', 0b111),
     Instruction('halt', 0b111)
 ]
+
+
+all_instructions = r_instructions + reduced_r_instructions + i_instructions + j_instructions + nop_instructions
+
+# Reserved names cannot be labels
+reserved_names = [i.name for i in all_instructions]
