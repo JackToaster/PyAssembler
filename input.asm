@@ -13,7 +13,7 @@ lw      $s1, 1($zero)               ;100 000 010 0000001     0x8101
 j    start                          ;110 0000000000000       0xC000
 
 
-# Assembly              ;Binary machine code     Hex machine code
-add $s2, $s0, $s1       ;000 001 010 011 0000    0x0530
-asl1 $s2, $s2           ;000 011 000 011 0100    0x0C34
-asl1 $s2, $s2           ;000 011 000 011 0100    0x0C34
+; Assembly              ;Binary machine code     Hex machine code
+;add $s2, $s0, $s1       ;000 001 010 011 0000    0x0530
+;asl1 $s2, $s2           ;000 011 000 011 0100    0x0C34
+;asl1 $s2, $s2           ;000 011 000 011 0100    0x0C34

@@ -2,7 +2,55 @@ from instructions import r_instructions, reduced_r_instructions, i_instructions,
 from registers import registers
 import re
 
-COMMENT_CHARACTER = ';'
+
+class ParseResult:
+    def __init__(self, loc, value):
+        self.loc = loc
+        self.value = value
+
+    def error(self):
+        return False
+
+    def map(self, fn):
+        return ParseResult(self.loc, fn(self.value))
+
+    def __repr__(self):
+        return '{}:({})'.format(self.loc, repr(self.value))
+
+
+class ParseError(ParseResult):
+    def __init__(self, loc, error_msg, causes=None):
+        super(ParseError, self).__init__(loc, None)
+        if causes is None:
+            causes = []
+        self.error_msg = error_msg
+        self.causes = causes
+
+    def error(self):
+        return True
+
+    # Do not map error values
+    def map(self, fn):
+        return self
+
+    def __repr__(self):
+        return '{}: Error: {}. Causes: {}'.format(self.loc, self.error_msg, self.causes)
+
+
+class ParserInput:
+    def __init__(self, text, loc=0):
+        self.text = text  # The actual text to parse
+        self.loc = loc  # Stores where in the text parsing is occuring
+
+    def advance(self, n):
+        return ParserInput(self.text, self.loc + n)
+
+    # Remaining text
+    def rtext(self):
+        if self.loc >= len(self.text):
+            return ''
+        else:
+            return self.text[self.loc:]
 
 
 # Element that returns its name when converted to a string, used for debugging
@@ -43,112 +91,138 @@ def get_obj_by_name(lst, name):
 
 
 # Parse any amount of whitespace and return a Whitespace object
-def parse_whitespace(text):
-    parsed = text.lstrip()
-    if len(parsed) == len(text):
-        return None, text
+def parse_whitespace(i: ParserInput) -> (ParseResult, ParserInput):
+    text = i.rtext()
+    stripped = text.lstrip()
+    if len(stripped) == len(text):
+        return ParseError(i.loc, 'Expected whitespace'), i
     else:
-        return Whitespace(), parsed
+        return ParseResult(i.loc, Whitespace()), i.advance(len(text) - len(stripped))
 
 
 # Parse a single-line comment (Starts with ; or #, ends at end of line)
-def parse_comment(text):
-    comment_characters = re.match('[#;].*\n', text)
+def parse_comment(i: ParserInput) -> (ParseResult, ParserInput):
+    comment_characters = re.match('[#;].*$', i.rtext(), flags=re.MULTILINE)
     if comment_characters is None:
-        return None, text
+        return ParseError(i.loc, 'Expected comment'), i
     else:
         match_text = comment_characters.group(0)
-        return Comment(match_text), text[len(match_text):]
+        return ParseResult(i.loc, Comment(match_text)), i.advance(len(match_text))
 
 
-def parse_label(text):
-    label_characters = re.match('[a-zA-Z_][a-zA-Z0-9_]*', text)
+def parse_label(i: ParserInput) -> (ParseResult, ParserInput):
+    label_characters = re.match('[a-zA-Z_][a-zA-Z0-9_]*', i.rtext())
     if label_characters is None:
-        return None, text
+        return ParseError(i.loc, 'Expected label'), i
     else:
         match_text = label_characters.group(0)
-        return Label(match_text), text[len(match_text):]
+        return ParseResult(i.loc, Label(match_text)), i.advance(len(match_text))
 
 
 # Returns an exact match for the string
 def parse_string(s, case_sensitive=False):
-    def parse_fn(text):
+    def parse_fn(i: ParserInput) -> (ParseResult, ParserInput):
+        text = i.rtext()
         if case_sensitive:
             if text.startswith(s):
-                return s, text[len(s):]
+                return ParseResult(i.loc, s), i.advance(len(s))
         else:
             if text.lower().startswith(s.lower()):
-                return s, text[len(s):]
-        return None, text
+                return ParseResult(i.loc, s), i.advance(len(s))
+        return ParseError(i.loc, 'Expected string "{}"'.format(s)), i
 
     return parse_fn
 
 
-def parser_numeric_literal(text):
-    literal_character = re.match('-?[0-9A-Fxb]+', text)
+def parser_numeric_literal(i: ParserInput) -> (ParseResult, ParserInput):
+    literal_character = re.match('-?[0-9A-Fxb]+', i.rtext())
     if literal_character is None:
-        return None, text
+        return ParseError(i.loc, 'Expected numeric literal'), i
     else:
         try:
             match_text = literal_character.group(0)
-            return int(match_text, 0), text[len(match_text):]
+            return ParseResult(i.loc, int(match_text, 0)), i.advance(len(match_text))
         except ValueError:
-            return None, text
+            return ParseError(i.loc, 'Unable to parse numeric literal'), i
 
 
 # Returns the result of the first parser that succeeds
-def parse_any(*parsers):
-    def parse_fn(text):
+def parse_any(*parsers, error_msg):
+    def parse_fn(i: ParserInput) -> (ParseResult, ParserInput):
+        failure_causes = []
         for parser in parsers:
-            output, rem = parser(text)
-            if output is not None:
+            output, rem = parser(i)
+            if not output.error():
                 return output, rem
-        return None, text
+            else:
+                failure_causes.append(output)
+
+        return ParseError(i.loc, error_msg, causes=failure_causes), i
 
     return parse_fn
 
 
 # Runs a parser zero or more times and returns a list of the output. Cannot fail.
 def zero_or_more_of(parser):
-    def parse_fn(text):
+    def parse_fn(i: ParserInput) -> (ParseResult, ParserInput):
+        loc = i.loc
         output = []
         while True:
-            parse_output, rem = parser(text)
-            if parse_output is None:
-                return output, text
+            parse_output, rem = parser(i)
+            if parse_output.error():
+                return ParseResult(loc, output), i
             else:
                 output.append(parse_output)
-                text = rem
+                i = rem
 
     return parse_fn
 
 
+# Same as above, but fails if none are found
 def one_or_more_of(parser):
-    def parse_fn(text):
+    def parse_fn(i: ParserInput) -> (ParseResult, ParserInput):
+        loc = i.loc
         output = []
 
-        parse_output, rem = parser(text)
-        if parse_output is None:
+        parse_output, rem = parser(i)
+        if parse_output.error():
             return parse_output, rem
         output.append(parse_output)
-        text = rem
+        i = rem
         while True:
-            parse_output, rem = parser(text)
-            if parse_output is None:
-                return output, text
+            parse_output, rem = parser(i)
+            if parse_output.error():
+                return ParseResult(loc, output), i
             else:
                 output.append(parse_output)
-                text = rem
+                i = rem
+
+    return parse_fn
+
+
+# Runs a parser for all of the output. Fails on any error.
+def parse_all(parser):
+    def parse_fn(i: ParserInput) -> (ParseResult, ParserInput):
+        loc = i.loc
+        output = []
+        while i.rtext() != '':
+            parse_output, rem = parser(i)
+            if parse_output.error():
+                return parse_output, i
+            else:
+                output.append(parse_output)
+                i = rem
+        return ParseResult(loc, output), i
 
     return parse_fn
 
 
 # Always succeeds, returns empty output if parser fails.
 def optional(parser):
-    def parse_fn(text):
-        output, rem = parser(text)
-        if output is None:
-            return [], text
+    def parse_fn(i: ParserInput) -> (ParseResult, ParserInput):
+        output, rem = parser(i)
+        if output.error():
+            return ParseResult(i.loc, None), i
         else:
             return output, rem
 
@@ -156,26 +230,31 @@ def optional(parser):
 
 
 # Runs a sequence of parsers, and returns a list of their outputs. Fails if any parser fails.
-def sequence(*parsers):
-    def parse_fn(text):
+def sequence(*parsers, custom_error_msg=None):
+    def parse_fn(i: ParserInput) -> (ParseResult, ParserInput):
+        loc = i.loc
         output = []
         for parser in parsers:
-            parse_output, rem = parser(text)
-            if parse_output is None:
-                return None, text
+            parse_output, rem = parser(i)
+            if parse_output.error():
+                if custom_error_msg is not None:
+                    return ParseError(i.loc, custom_error_msg, causes=[parse_output]), i
+                else:
+                    return parse_output, i
             else:
                 output.append(parse_output)
-                text = rem
-        return output, text
+                i = rem
+        return ParseResult(loc, output), i
 
     return parse_fn
 
 
+# Applies a function to the returned value of a parser if it succeeds
 def parser_map(parser, map_fn):
-    def parse_fn(text):
-        output, rem = parser(text)
-        if output is not None:
-            return map_fn(output), rem
+    def parse_fn(i: ParserInput) -> (ParseResult, ParserInput):
+        output, rem = parser(i)
+        if not output.error():
+            return ParseResult(output.loc, map_fn(output.value)), rem
         return output, rem
 
     return parse_fn
@@ -183,40 +262,40 @@ def parser_map(parser, map_fn):
 
 # Returns the output of the left parser out of a given pair
 def left(left_parser, right_parser):
-    return parser_map(sequence(left_parser, right_parser), lambda output: output[0])
+    return parser_map(sequence(left_parser, right_parser), lambda output: output[0].value)
 
 
 # Returns the output of the right parser out of a given pair
 def right(left_parser, right_parser):
-    return parser_map(sequence(left_parser, right_parser), lambda output: output[1])
+    return parser_map(sequence(left_parser, right_parser), lambda output: output[1].value)
 
 
 def wrap_whitespace(parser):
     return left(right(optional_whitespace, parser), optional_whitespace)
 
 
-def parse_any_string(*strings):
-    return parse_any(*[parse_string(s) for s in strings])
+def parse_any_string(*strings, error_msg):
+    return parse_any(*[parse_string(s) for s in strings], error_msg=error_msg)
 
 
-def parse_mnemonic(instr_list):
+def parse_mnemonic(instr_list, error_msg):
     return parser_map(
-        parse_any_string(*[inst.name for inst in instr_list]),
+        parse_any_string(*[inst.name for inst in instr_list], error_msg=error_msg),
         lambda name: get_obj_by_name(instr_list, name)
     )
 
 
-whitespace_and_comment = one_or_more_of(parse_any(parse_whitespace, parse_comment))
+whitespace_and_comment = one_or_more_of(parse_any(parse_whitespace, parse_comment, error_msg='Expected whitespace or comment'))
 
 optional_whitespace = optional(whitespace_and_comment)
 
 parse_register = parser_map(
-    parse_any_string(*[r.name for r in registers]),
+    parse_any_string(*[r.name for r in registers], error_msg='Expected register name'),
     lambda name: get_obj_by_name(registers, name)
 )
 
 parse_r_type = sequence(
-    parse_mnemonic(r_instructions),  # Instruction mnemonic, e.g. 'addi'
+    parse_mnemonic(r_instructions, error_msg='Expected R-type instruction'),  # Instruction mnemonic, e.g. 'addi'
     right(parse_whitespace, parse_register),  # Register rd (must have whitespace beforehand)
     right(  # Ignore return value from comma, keep register
         wrap_whitespace(parse_string(',')),  # Comma separating registers (plus any amount of whitespace)
@@ -230,7 +309,7 @@ parse_r_type = sequence(
 # Parse an R-type instruction that only uses two arguments (E.G. shift by one instructions).
 # The third argument is given as zero.
 parse_reduced_r_type = parser_map(sequence(
-    parse_mnemonic(reduced_r_instructions),  # Instruction mnemonic, e.g. 'addi'
+    parse_mnemonic(reduced_r_instructions, 'Expected 2-operand R-type instruction'),  # Instruction mnemonic, e.g. 'addi'
     right(parse_whitespace, parse_register),  # Register rd (must have whitespace beforehand)
     right(  # Ignore return value from comma, keep register
         wrap_whitespace(parse_string(',')),  # Comma separating registers (plus any amount of whitespace)
@@ -242,15 +321,16 @@ parse_reduced_r_type = parser_map(sequence(
 def flatten_list(lst):
     outlist = []
     for it in lst:
-        if hasattr(it, '__iter__'):
-            outlist = outlist + flatten_list(it)
+        val = it.value
+        if hasattr(val, '__iter__'):
+            outlist = outlist + flatten_list(val)
         else:
             outlist.append(it)
     return outlist
 
 
 parse_i_type = parser_map(sequence(
-    parse_mnemonic(i_instructions),
+    parse_mnemonic(i_instructions, error_msg='Expected I-type instruction'),
     right(parse_whitespace, parse_register),  # First register (must have whitespace beforehand)
     right(  # Ignore return value from comma, keep register
         wrap_whitespace(parse_string(',')),  # Comma separating registers (plus any amount of whitespace)
@@ -263,7 +343,7 @@ parse_i_type = parser_map(sequence(
                 parse_register,
                 right(  # Ignore return value from comma, keep value
                     wrap_whitespace(parse_string(',')),  # Comma separating registers (plus any amount of whitespace)
-                    parse_any(parser_numeric_literal, parse_label)  # immediate/label
+                    parse_any(parser_numeric_literal, parse_label, error_msg='Expected numeric literal or label')  # immediate/label
                 )
             ),
             parser_map(  # Second option (parentheses)
@@ -271,25 +351,23 @@ parse_i_type = parser_map(sequence(
                     parser_numeric_literal,
                     left(right(wrap_whitespace(parse_string('(')), parse_register), wrap_whitespace(parse_string(')')))
                 ), lambda output: (output[1], output[0])  # Swap order since literal comes first
-            )
+            ),
+            error_msg='Expected valid i-type arguments'
         )
     )
 ), lambda out: flatten_list(out))  # since this got hierarchical, un-hierarchy it
 
 # J type is just a mnemonic plus literal/label
 parse_j_type = sequence(
-    parse_mnemonic(j_instructions),
-    right(parse_whitespace, parse_any(parser_numeric_literal, parse_label))
+    parse_mnemonic(j_instructions, error_msg='Expected J-type instruction'),
+    right(parse_whitespace, parse_any(parser_numeric_literal, parse_label, error_msg='Expected numeric literal or label'))
 )
 
-parse_nop = parser_map(
-    parse_mnemonic(nop_instructions),
-    lambda output: [output]
-)
+parse_nop = sequence(parse_mnemonic(nop_instructions, error_msg='Expected NOP'))
 
-parse_instruction = parse_any(parse_r_type, parse_reduced_r_type, parse_i_type, parse_j_type, parse_nop)
+parse_instruction = parse_any(parse_r_type, parse_reduced_r_type, parse_i_type, parse_j_type, parse_nop, error_msg='Expected an instruction')
 
 # Parse a label on a new line, with format "label: ...." or "label ...." (colon is optional)
 line_label = left(parse_label, optional(parse_string(':')))
 
-parse_asm = zero_or_more_of(wrap_whitespace(parse_any(parse_instruction, line_label)))
+parse_asm = left(zero_or_more_of(wrap_whitespace(parse_any(parse_instruction, line_label, error_msg='Expected an instruction or label'))), parse_all(whitespace_and_comment))
