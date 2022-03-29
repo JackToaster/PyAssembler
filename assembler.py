@@ -5,19 +5,32 @@ import argparse
 from pathlib import Path
 import sys
 
+OUTPUT_FORMATS = ['words', 'bytes', 'binary']
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('infile', metavar='INPUT', help='Assembly file to read')
-    parser.add_argument('-o', metavar='OUTPUT', help='File to write hexadecimal machine code into')
+    parser.add_argument('infile', metavar='INPUT', type=str, help='Assembly file to read')
+    parser.add_argument('-f', metavar='Format', type=str, default='bytes', help='Format to use when writing output '
+                                                                                'file ("words", "bytes", or "binary")')
+    parser.add_argument('-o', metavar='OUTPUT', type=str, help='File to write hexadecimal machine code into')
 
     args = parser.parse_args()
 
     asmfile = args.infile
     outfile = args.o
 
+    out_format = args.f.lower()
+
+    # Make sure the output format is one of the implemented formats
+    if out_format not in OUTPUT_FORMATS:
+        print('Unsupported output format "{}"'.format(out_format))
+        sys.exit(1)
+
     if outfile is None:
+        suffix = '.txt' if out_format == 'binary' else '.hex'
         outfile = Path(asmfile)
-        outfile = outfile.with_suffix('.o')
+        outfile = outfile.with_suffix(suffix)
 
     # First pass: Parse text into syntax tree (not a very impressive tree as assembly has no nesting structure)
     with open(asmfile, 'r') as asmfile:
@@ -58,14 +71,40 @@ def main():
         if hasattr(item.value, '__iter__'):
             instruction = item.value[0].value
             arguments = [it.value for it in item.value[1:]]
-            arguments = list(map(lambda arg: label_addresses[arg] if isinstance(arg, Label) else arg, arguments))
+            try:
+                arguments = list(map(lambda arg: label_addresses[arg] if isinstance(arg, Label) else arg, arguments))
+            except KeyError as e:
+                missing_label = e.args[0].name
+                print('Error: Label "{}" is never defined'.format(missing_label))
+                sys.exit(1)
             # print(arguments)
             machine_code.append(instruction.to_machine_code(address, *arguments))
             address += ADDRESS_INCREMENT
 
+    # Write output to file
     with open(outfile, 'w') as outfile:
-        for instruction in machine_code:
-            outfile.write('{:04x}\n'.format(instruction))
+        if out_format == 'bytes':
+            # Header required for Digital to recognize hex file
+            outfile.write('v2.0 raw\n')
+            for instruction in machine_code:
+                # Write individual bytes on separate lines
+                word = '{:04x}'.format(instruction)
+                outfile.write('{}\n{}\n'.format(word[0:2], word[2:4]))
+        elif out_format == 'words':
+            # Header required for Digital to recognize hex file
+            outfile.write('v2.0 raw\n')
+            for instruction in machine_code:
+                # Write each 2-byte word on its own line
+                word = '{:04x}'.format(instruction)
+                outfile.write('{}\n'.format(word))
+        elif out_format == 'binary':
+            for instruction in machine_code:
+                # Write each 2-byte word on its own line in binary
+                word = '{:016b}'.format(instruction)
+                outfile.write('{}\n'.format(word))
+
+
+
 
 
 if __name__ == '__main__':
