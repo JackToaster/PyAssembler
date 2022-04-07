@@ -15,6 +15,8 @@ def main():
                                                                                 'file ("words", "bytes", or "binary")')
     parser.add_argument('-o', metavar='OUTPUT', type=str, help='File to write hexadecimal machine code into')
 
+    parser.add_argument('-s', '--skip_odd', action='store_const', const=True, default=False, help='Write zeros to odd addresses')
+
     args = parser.parse_args()
 
     asmfile = args.infile
@@ -87,21 +89,36 @@ def main():
             # Header required for Digital to recognize hex file
             outfile.write('v2.0 raw\n')
             for instruction in machine_code:
-                # Write individual bytes on separate lines
                 word = '{:04x}'.format(instruction)
-                outfile.write('{}\n{}\n'.format(word[0:2], word[2:4]))
+                # Handle skip odd addresses argument
+                if args.skip_odd:
+                    # Write individual bytes on separate lines with zero bytes in between
+                    outfile.write('{}\n00\n{}\n00\n'.format(word[0:2], word[2:4]))
+                else:
+                    # Write individual bytes on separate lines
+                    outfile.write('{}\n{}\n'.format(word[0:2], word[2:4]))
         elif out_format == 'words':
             # Header required for Digital to recognize hex file
             outfile.write('v2.0 raw\n')
             for instruction in machine_code:
-                # Write each 2-byte word on its own line
                 word = '{:04x}'.format(instruction)
-                outfile.write('{}\n'.format(word))
+
+                # Handle skip odd addresses argument
+                if args.skip_odd:
+                    # Write each 2-byte word on its own line with zeros in between
+                    outfile.write('{}\n0000\n'.format(word))
+                else:
+                    # Write each 2-byte word on its own line
+                    outfile.write('{}\n'.format(word))
         elif out_format == 'binary':
             for instruction in machine_code:
                 # Write each 2-byte word on its own line in binary
                 word = '{:016b}'.format(instruction)
                 outfile.write('{}\n'.format(word))
+
+                if args.skip_odd:
+                    # write a line of zeros on odd addresses
+                    outfile.write('{:016b}\n'.format(0))
 
 
 
