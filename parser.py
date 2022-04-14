@@ -55,8 +55,8 @@ class ParserInput:
 
     def get_line(self, loc):
         idx = max(0, self.text.rfind('\n', 0, loc))  # Start of line or start of string
-        line = re.match('.*$', self.text[idx + 1:], flags=re.MULTILINE).group(0) # Text up to end of line/string
-        line_no = self.text[:idx].count('\n')
+        line = re.match('.*$', self.text[idx + 1:], flags=re.MULTILINE).group(0)  # Text up to end of line/string
+        line_no = self.text[:idx].count('\n') + 2
         return line, idx, line_no
 
     def display_error(self, error: ParseError, max_depth, max_breadth, indent=0, parent_index=-1):
